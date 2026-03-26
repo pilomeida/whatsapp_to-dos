@@ -43,7 +43,6 @@ export async function transcribeAudio(
   const transcription = await getOpenAI().audio.transcriptions.create({
     file,
     model: "whisper-1",
-    language: "pt", // Portuguese — change or remove for auto-detect
   });
 
   return transcription.text;
