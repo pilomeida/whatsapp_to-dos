@@ -62,6 +62,11 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showChangePwd, setShowChangePwd] = useState(false);
+  const [currentPwd, setCurrentPwd] = useState("");
+  const [newPwd, setNewPwd] = useState("");
+  const [pwdError, setPwdError] = useState("");
+  const [pwdSaving, setPwdSaving] = useState(false);
 
   // Add form state
   const [newTitle, setNewTitle] = useState("");
@@ -113,6 +118,26 @@ export default function Dashboard() {
       body: JSON.stringify({ id, deadline: deadline || null }),
     });
     fetchTodos();
+  }
+
+  async function handleChangePwd(e: React.FormEvent) {
+    e.preventDefault();
+    setPwdSaving(true);
+    setPwdError("");
+    const res = await fetch("/api/auth/change", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword: currentPwd, newPassword: newPwd }),
+    });
+    if (res.ok) {
+      setShowChangePwd(false);
+      setCurrentPwd("");
+      setNewPwd("");
+    } else {
+      const data = await res.json();
+      setPwdError(data.error ?? "Something went wrong.");
+    }
+    setPwdSaving(false);
   }
 
   async function handleAdd(e: React.FormEvent) {
@@ -174,17 +199,74 @@ export default function Dashboard() {
                 {open.length} open · {done.length} completed recently
               </p>
             </div>
-            <button
-              onClick={() => setShowAdd(!showAdd)}
-              className="text-sm px-4 py-2 bg-stone-900 text-white rounded hover:bg-stone-700 transition-colors"
-            >
-              {showAdd ? "Cancel" : "+ Add"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setShowChangePwd(!showChangePwd); setShowAdd(false); }}
+                className="text-sm px-3 py-2 text-stone-400 hover:text-stone-700 transition-colors"
+                title="Change password"
+              >
+                🔑
+              </button>
+              <button
+                onClick={() => { setShowAdd(!showAdd); setShowChangePwd(false); }}
+                className="text-sm px-4 py-2 bg-stone-900 text-white rounded hover:bg-stone-700 transition-colors"
+              >
+                {showAdd ? "Cancel" : "+ Add"}
+              </button>
+            </div>
           </div>
         </div>
       </header>
 
       <main className="max-w-3xl mx-auto px-6 py-8">
+        {/* Change password form */}
+        {showChangePwd && (
+          <form
+            onSubmit={handleChangePwd}
+            className="mb-8 bg-white border border-stone-200 rounded-lg p-5 shadow-sm"
+          >
+            <h2 className="text-sm font-medium text-stone-500 uppercase tracking-wider mb-4">
+              Change password
+            </h2>
+            <div className="space-y-3">
+              <input
+                type="password"
+                placeholder="Current password"
+                value={currentPwd}
+                onChange={(e) => setCurrentPwd(e.target.value)}
+                required
+                autoFocus
+                className="w-full border border-stone-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-stone-400"
+              />
+              <input
+                type="password"
+                placeholder="New password"
+                value={newPwd}
+                onChange={(e) => setNewPwd(e.target.value)}
+                required
+                className="w-full border border-stone-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-stone-400"
+              />
+              {pwdError && <p className="text-red-500 text-xs">{pwdError}</p>}
+              <div className="flex gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => { setShowChangePwd(false); setPwdError(""); }}
+                  className="px-3 py-2 text-sm text-stone-500 hover:text-stone-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={pwdSaving}
+                  className="px-4 py-2 bg-stone-900 text-white text-sm rounded hover:bg-stone-700 transition-colors disabled:opacity-50"
+                >
+                  {pwdSaving ? "Saving…" : "Update"}
+                </button>
+              </div>
+            </div>
+          </form>
+        )}
+
         {/* Add form */}
         {showAdd && (
           <form

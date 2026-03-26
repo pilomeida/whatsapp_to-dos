@@ -11,6 +11,8 @@ import {
   deleteTodo,
   type Todo,
 } from "@/lib/todos";
+import { generateToken } from "@/lib/password";
+import { setSetting } from "@/lib/settings";
 
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
@@ -77,6 +79,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const message = (params["Body"] ?? "").trim();
   if (!message) return twimlReply("No message received.");
+
+  // Handle password reset before Claude parsing
+  if (/^reset password$/i.test(message)) {
+    const token = generateToken();
+    const expiry = Date.now() + 15 * 60 * 1000; // 15 minutes
+    await setSetting("reset_token", token);
+    await setSetting("reset_token_expiry", String(expiry));
+    const resetUrl = `${process.env.WEBHOOK_URL!.replace("/api/whatsapp", "")}/reset?token=${token}`;
+    return twimlReply(`🔑 Reset link (valid 15 min):\n${resetUrl}`);
+  }
 
   // Set a 4.5s timeout to stay under Twilio's 5s limit
   const timeoutMs = 4500;
