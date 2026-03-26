@@ -100,6 +100,13 @@ https://project-tygma.vercel.app/api/whatsapp
 
 ---
 
+## Forgot your password?
+
+The dashboard password is stored as the `APP_PASSWORD` environment variable in Vercel.
+To reset it: Vercel → Settings → Environment Variables → edit `APP_PASSWORD` → Save → Redeploy.
+
+---
+
 ## Notes
 
 - Only messages from the configured `MY_WHATSAPP_NUMBER` are processed
