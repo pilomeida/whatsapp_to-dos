@@ -21,6 +21,7 @@ import {
 } from "@/lib/todos";
 import { generateToken } from "@/lib/password";
 import { getSetting, setSetting } from "@/lib/settings";
+import { transcribeAudio } from "@/lib/transcribe";
 
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 const MY_WHATSAPP_NUMBER = process.env.MY_WHATSAPP_NUMBER!;
@@ -127,7 +128,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const from = params["From"] ?? "";
   if (from !== MY_WHATSAPP_NUMBER) return twimlReply("Unauthorized.");
 
-  const message = (params["Body"] ?? "").trim();
+  let message = (params["Body"] ?? "").trim();
+
+  // Transcribe voice notes via Whisper
+  const numMedia = parseInt(params["NumMedia"] ?? "0");
+  if (numMedia > 0 && (params["MediaContentType0"] ?? "").startsWith("audio/")) {
+    try {
+      message = await transcribeAudio(
+        params["MediaUrl0"],
+        params["MediaContentType0"]
+      );
+    } catch {
+      return twimlReply("Sorry, I couldn't process the voice message. Please try again.");
+    }
+  }
+
   if (!message) return twimlReply("No message received.");
 
   if (/^reset password$/i.test(message)) {
