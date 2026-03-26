@@ -52,7 +52,10 @@ function twimlReply(body: string): NextResponse {
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // Validate Twilio signature
-  const url = req.url;
+  // Reconstruct the exact public URL Twilio signed — req.url can differ in Vercel's runtime
+  const proto = req.headers.get("x-forwarded-proto") ?? "https";
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
+  const url = `${proto}://${host}/api/whatsapp`;
   const signature = req.headers.get("x-twilio-signature") ?? "";
   const body = await req.text();
   const params = Object.fromEntries(new URLSearchParams(body));
