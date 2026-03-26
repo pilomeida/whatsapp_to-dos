@@ -5,55 +5,99 @@ import {
   addTodo,
   listToday,
   listWeek,
+  listMonth,
+  listYear,
   markDone,
+  markDoneById,
   updatePriority,
   updateDeadline,
   deleteTodo,
   type Todo,
 } from "@/lib/todos";
 import { generateToken } from "@/lib/password";
-import { setSetting } from "@/lib/settings";
+import { getSetting, setSetting } from "@/lib/settings";
 
-const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 const MY_WHATSAPP_NUMBER = process.env.MY_WHATSAPP_NUMBER!;
 
 const priorityEmoji: Record<string, string> = {
-  high: "🔴",
-  medium: "🟡",
+  urgent: "🔴",
+  high: "🟡",
+  medium: "🔵",
   low: "🟢",
 };
 
-function formatDeadline(deadline: string | null): string {
-  if (!deadline) return "";
-  const today = new Date().toLocaleDateString("en-CA", {
-    timeZone: "Europe/Lisbon",
-  });
-  if (deadline === today) return " · due today";
-  const d = new Date(deadline + "T00:00:00");
-  return ` · due ${d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}`;
+function twimlReply(body: string): NextResponse {
+  const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${body}</Message></Response>`;
+  return new NextResponse(twiml, { headers: { "Content-Type": "text/xml" } });
 }
 
-function formatList(title: string, todos: Todo[]): string {
+function lisbonToday(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Lisbon" });
+}
+
+function formatDateHeader(dateStr: string): string {
+  const today = lisbonToday();
+  const tomorrow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Lisbon" }));
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toLocaleDateString("en-CA");
+
+  if (dateStr === today) return "Today";
+  if (dateStr === tomorrowStr) return "Tomorrow";
+  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-GB", {
+    weekday: "long", day: "numeric", month: "short",
+  });
+}
+
+function todoLine(t: Todo, i: number): string {
+  const cat = t.category ? ` [${t.category}]` : "";
+  return `${i}. ${t.title}${cat} ${priorityEmoji[t.priority]}`;
+}
+
+// Flat list for today (no date grouping needed)
+function formatFlatList(title: string, todos: Todo[]): string {
   if (todos.length === 0) return `📋 *${title}*\n\nNo open to-dos.`;
-  const lines = todos
-    .map(
-      (t, i) =>
-        `${i + 1}. ${t.title} ${priorityEmoji[t.priority]} ${t.priority}${formatDeadline(t.deadline)}`
-    )
-    .join("\n");
+  const lines = todos.map((t, i) => todoLine(t, i + 1)).join("\n");
   return `📋 *${title}*\n\n${lines}\n\nReply "done [number or name]" to mark complete.`;
 }
 
-function twimlReply(body: string): NextResponse {
-  const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${body}</Message></Response>`;
-  return new NextResponse(twiml, {
-    headers: { "Content-Type": "text/xml" },
+// Grouped by date for week/month/year
+function formatGroupedList(title: string, todos: Todo[]): string {
+  if (todos.length === 0) return `📋 *${title}*\n\nNo open to-dos.`;
+
+  const groups = new Map<string, Todo[]>();
+  for (const t of todos) {
+    const key = t.deadline ?? "__none__";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(t);
+  }
+
+  const sortedKeys = [...groups.keys()].sort((a, b) => {
+    if (a === "__none__") return 1;
+    if (b === "__none__") return -1;
+    return a.localeCompare(b);
   });
+
+  let counter = 1;
+  const parts: string[] = [`📋 *${title}*`];
+
+  for (const key of sortedKeys) {
+    const label = key === "__none__" ? "No date" : formatDateHeader(key);
+    parts.push(`\n*${label}*`);
+    for (const t of groups.get(key)!) {
+      parts.push(todoLine(t, counter++));
+    }
+  }
+
+  parts.push('\nReply "done [number or name]" to mark complete.');
+  return parts.join("\n");
+}
+
+async function saveLastList(todos: Todo[]): Promise<void> {
+  await setSetting("last_list", JSON.stringify(todos.map((t) => t.id)));
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  // Validate Twilio signature
   const url = process.env.WEBHOOK_URL!;
   const signature = req.headers.get("x-twilio-signature") ?? "";
   const body = await req.text();
@@ -61,43 +105,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const valid = twilio.validateRequest(TWILIO_AUTH_TOKEN, signature, url, params);
   if (!valid) {
-    console.error(
-      "Twilio validation failed. url=%s token_len=%d sig=%s params=%s",
-      url,
-      TWILIO_AUTH_TOKEN?.length ?? 0,
-      signature,
-      JSON.stringify(params)
-    );
+    console.error("Twilio validation failed. url=%s token_len=%d sig=%s", url, TWILIO_AUTH_TOKEN?.length ?? 0, signature);
     return new NextResponse("Forbidden", { status: 403 });
   }
 
-  // Validate sender
   const from = params["From"] ?? "";
-  if (from !== MY_WHATSAPP_NUMBER) {
-    return twimlReply("Unauthorized.");
-  }
+  if (from !== MY_WHATSAPP_NUMBER) return twimlReply("Unauthorized.");
 
   const message = (params["Body"] ?? "").trim();
   if (!message) return twimlReply("No message received.");
 
-  // Handle password reset before Claude parsing
+  // Password reset — handle before Claude
   if (/^reset password$/i.test(message)) {
     const token = generateToken();
-    const expiry = Date.now() + 15 * 60 * 1000; // 15 minutes
+    const expiry = Date.now() + 15 * 60 * 1000;
     await setSetting("reset_token", token);
     await setSetting("reset_token_expiry", String(expiry));
-    const resetUrl = `${process.env.WEBHOOK_URL!.replace("/api/whatsapp", "")}/reset?token=${token}`;
+    const resetUrl = `${url.replace("/api/whatsapp", "")}/reset?token=${token}`;
     return twimlReply(`🔑 Reset link (valid 15 min):\n${resetUrl}`);
   }
 
-  // Set a 4.5s timeout to stay under Twilio's 5s limit
   const timeoutMs = 4500;
   let timedOut = false;
   const timeoutPromise = new Promise<NextResponse>((resolve) => {
-    setTimeout(() => {
-      timedOut = true;
-      resolve(twimlReply("Sorry, that took too long. Please try again."));
-    }, timeoutMs);
+    setTimeout(() => { timedOut = true; resolve(twimlReply("Sorry, that took too long. Please try again.")); }, timeoutMs);
   });
 
   const workPromise = (async (): Promise<NextResponse> => {
@@ -109,7 +140,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     if (timedOut) return twimlReply("Done.");
-
     const { intent, todo } = parsed;
 
     try {
@@ -121,34 +151,53 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             notes: todo.notes,
             priority: todo.priority,
             deadline: todo.deadline,
+            category: todo.category,
           });
-          const deadlinePart = added.deadline ? ` · due ${added.deadline}` : "";
+          const deadlinePart = added.deadline
+            ? ` · due ${new Date(added.deadline + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}`
+            : "";
+          const catPart = added.category ? ` [${added.category}]` : "";
           return twimlReply(
-            `✅ Added: *${added.title}* ${priorityEmoji[added.priority]} ${added.priority}${deadlinePart}`
+            `✅ Added: *${added.title}*${catPart} ${priorityEmoji[added.priority]} ${added.priority}${deadlinePart}`
           );
         }
 
         case "list_today": {
           const todos = await listToday();
-          return twimlReply(formatList("Today's to-dos", todos));
+          await saveLastList(todos);
+          return twimlReply(formatFlatList("Today's to-dos", todos));
         }
 
         case "list_week": {
           const todos = await listWeek();
-          return twimlReply(formatList("This week", todos));
+          await saveLastList(todos);
+          return twimlReply(formatGroupedList("This week", todos));
+        }
+
+        case "list_month": {
+          const todos = await listMonth();
+          await saveLastList(todos);
+          return twimlReply(formatGroupedList("This month", todos));
+        }
+
+        case "list_year": {
+          const todos = await listYear();
+          await saveLastList(todos);
+          return twimlReply(formatGroupedList("This year", todos));
         }
 
         case "done": {
-          // Support "done 2" (number) or "done task name"
           const term = todo.search_term ?? "";
           const numMatch = term.match(/^\d+$/);
           let result;
           if (numMatch) {
-            const todos = await listToday();
+            // Use last displayed list for number-based done
+            const lastListJson = await getSetting("last_list");
+            const ids: string[] = lastListJson ? JSON.parse(lastListJson) : [];
             const idx = parseInt(term) - 1;
-            const target = todos[idx];
-            if (!target) return twimlReply(`No item #${term} in today's list.`);
-            result = await markDone(target.title);
+            const targetId = ids[idx];
+            if (!targetId) return twimlReply(`No item #${term} in the last list.`);
+            result = await markDoneById(targetId);
           } else {
             result = await markDone(term);
           }
@@ -161,9 +210,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             return twimlReply("I need both a task name and a priority level.");
           const result = await updatePriority(todo.search_term, todo.priority);
           if (!result) return twimlReply(`Couldn't find a to-do matching "${todo.search_term}".`);
-          return twimlReply(
-            `🔺 *${result.title}* is now ${result.priority} priority`
-          );
+          return twimlReply(`${priorityEmoji[result.priority]} *${result.title}* is now ${result.priority} priority`);
         }
 
         case "set_deadline": {
@@ -171,18 +218,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             return twimlReply("I need both a task name and a deadline.");
           const result = await updateDeadline(todo.search_term, todo.deadline);
           if (!result) return twimlReply(`Couldn't find a to-do matching "${todo.search_term}".`);
-          const d = new Date(result.deadline! + "T00:00:00");
-          const formatted = d.toLocaleDateString("en-GB", {
-            weekday: "short",
-            day: "numeric",
-            month: "short",
+          const formatted = new Date(result.deadline! + "T00:00:00").toLocaleDateString("en-GB", {
+            weekday: "short", day: "numeric", month: "short",
           });
           return twimlReply(`📅 *${result.title}* due ${formatted}`);
         }
 
         case "delete": {
-          if (!todo.search_term)
-            return twimlReply("I need a task name to delete.");
+          if (!todo.search_term) return twimlReply("I need a task name to delete.");
           const result = await deleteTodo(todo.search_term);
           if (!result) return twimlReply(`Couldn't find a to-do matching "${todo.search_term}".`);
           return twimlReply(`🗑️ Deleted: *${result.title}*`);
@@ -190,9 +233,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         case "unknown":
         default:
-          return twimlReply(
-            "Sorry, I didn't get that. Try: \"add call João Friday high priority\""
-          );
+          return twimlReply('Sorry, I didn\'t get that. Try: "add Taxes: file IRS next Friday high priority"');
       }
     } catch {
       return twimlReply("Something went wrong. Please try again.");

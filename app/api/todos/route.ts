@@ -26,10 +26,10 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { title, notes, priority, deadline } = body;
+    const { title, notes, priority, deadline, category } = body;
     if (!title) return NextResponse.json({ error: "title is required" }, { status: 400 });
 
-    const todo = await addTodo({ title, notes, priority, deadline });
+    const todo = await addTodo({ title, notes, priority, deadline, category });
     return NextResponse.json(todo, { status: 201 });
   } catch (err) {
     console.error(err);

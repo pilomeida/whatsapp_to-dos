@@ -6,20 +6,23 @@ interface Todo {
   id: string;
   title: string;
   notes: string | null;
-  priority: "high" | "medium" | "low";
+  priority: "urgent" | "high" | "medium" | "low";
   deadline: string | null;
+  category: string | null;
   done: boolean;
   done_at: string | null;
   created_at: string;
 }
 
 const priorityColor: Record<string, string> = {
-  high: "bg-red-500",
-  medium: "bg-amber-400",
+  urgent: "bg-red-500",
+  high: "bg-yellow-400",
+  medium: "bg-blue-500",
   low: "bg-emerald-500",
 };
 
 const priorityLabel: Record<string, string> = {
+  urgent: "Urgent",
   high: "High",
   medium: "Medium",
   low: "Low",
@@ -71,8 +74,9 @@ export default function Dashboard() {
   // Add form state
   const [newTitle, setNewTitle] = useState("");
   const [newNotes, setNewNotes] = useState("");
-  const [newPriority, setNewPriority] = useState<"high" | "medium" | "low">("medium");
+  const [newPriority, setNewPriority] = useState<"urgent" | "high" | "medium" | "low">("medium");
   const [newDeadline, setNewDeadline] = useState("");
+  const [newCategory, setNewCategory] = useState("");
 
   async function fetchTodos() {
     const res = await fetch("/api/todos");
@@ -102,7 +106,7 @@ export default function Dashboard() {
     fetchTodos();
   }
 
-  async function setPriority(id: string, priority: "high" | "medium" | "low") {
+  async function setPriority(id: string, priority: "urgent" | "high" | "medium" | "low") {
     await fetch("/api/todos", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -152,12 +156,14 @@ export default function Dashboard() {
         notes: newNotes.trim() || null,
         priority: newPriority,
         deadline: newDeadline || null,
+        category: newCategory.trim() || null,
       }),
     });
     setNewTitle("");
     setNewNotes("");
     setNewPriority("medium");
     setNewDeadline("");
+    setNewCategory("");
     setShowAdd(false);
     setSaving(false);
     fetchTodos();
@@ -295,17 +301,25 @@ export default function Dashboard() {
               <div className="flex gap-3">
                 <select
                   value={newPriority}
-                  onChange={(e) => setNewPriority(e.target.value as "high" | "medium" | "low")}
+                  onChange={(e) => setNewPriority(e.target.value as "urgent" | "high" | "medium" | "low")}
                   className="border border-stone-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-stone-400"
                 >
-                  <option value="high">High priority</option>
-                  <option value="medium">Medium priority</option>
-                  <option value="low">Low priority</option>
+                  <option value="urgent">Urgent</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
                 </select>
                 <input
                   type="date"
                   value={newDeadline}
                   onChange={(e) => setNewDeadline(e.target.value)}
+                  className="border border-stone-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-stone-400"
+                />
+                <input
+                  type="text"
+                  placeholder="Category (optional)"
+                  value={newCategory}
+                  onChange={(e) => setNewCategory(e.target.value)}
                   className="border border-stone-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-stone-400"
                 />
                 <button
@@ -382,15 +396,22 @@ export default function Dashboard() {
                     <p className="text-xs text-stone-400 mt-0.5">{todo.notes}</p>
                   )}
                   <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                    {/* Category tag */}
+                    {todo.category && (
+                      <span className="text-xs text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded">
+                        {todo.category}
+                      </span>
+                    )}
                     {/* Inline priority edit */}
                     {!todo.done && (
                       <select
                         value={todo.priority}
                         onChange={(e) =>
-                          setPriority(todo.id, e.target.value as "high" | "medium" | "low")
+                          setPriority(todo.id, e.target.value as "urgent" | "high" | "medium" | "low")
                         }
                         className="text-xs text-stone-400 bg-transparent border-none focus:outline-none cursor-pointer hover:text-stone-700"
                       >
+                        <option value="urgent">Urgent</option>
                         <option value="high">High</option>
                         <option value="medium">Medium</option>
                         <option value="low">Low</option>
