@@ -10,8 +10,13 @@ import {
   markDone,
   markDoneById,
   updatePriority,
+  updatePriorityById,
   updateDeadline,
+  updateDeadlineById,
   deleteTodo,
+  deleteTodoById,
+  getTodoById,
+  updateTodo,
   type Todo,
 } from "@/lib/todos";
 import { generateToken } from "@/lib/password";
@@ -40,10 +45,8 @@ function formatDateHeader(dateStr: string): string {
   const today = lisbonToday();
   const tomorrow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Lisbon" }));
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toLocaleDateString("en-CA");
-
   if (dateStr === today) return "Today";
-  if (dateStr === tomorrowStr) return "Tomorrow";
+  if (dateStr === tomorrow.toLocaleDateString("en-CA")) return "Tomorrow";
   return new Date(dateStr + "T00:00:00").toLocaleDateString("en-GB", {
     weekday: "long", day: "numeric", month: "short",
   });
@@ -54,14 +57,12 @@ function todoLine(t: Todo, i: number): string {
   return `${i}. ${t.title}${cat} ${priorityEmoji[t.priority]}`;
 }
 
-// Flat list for today (no date grouping needed)
 function formatFlatList(title: string, todos: Todo[]): string {
   if (todos.length === 0) return `📋 *${title}*\n\nNo open to-dos.`;
   const lines = todos.map((t, i) => todoLine(t, i + 1)).join("\n");
   return `📋 *${title}*\n\n${lines}\n\nReply "done [number or name]" to mark complete.`;
 }
 
-// Grouped by date for week/month/year
 function formatGroupedList(title: string, todos: Todo[]): string {
   if (todos.length === 0) return `📋 *${title}*\n\nNo open to-dos.`;
 
@@ -80,21 +81,35 @@ function formatGroupedList(title: string, todos: Todo[]): string {
 
   let counter = 1;
   const parts: string[] = [`📋 *${title}*`];
-
   for (const key of sortedKeys) {
-    const label = key === "__none__" ? "No date" : formatDateHeader(key);
-    parts.push(`\n*${label}*`);
+    parts.push(`\n*${key === "__none__" ? "No date" : formatDateHeader(key)}*`);
     for (const t of groups.get(key)!) {
       parts.push(todoLine(t, counter++));
     }
   }
-
   parts.push('\nReply "done [number or name]" to mark complete.');
   return parts.join("\n");
 }
 
 async function saveLastList(todos: Todo[]): Promise<void> {
   await setSetting("last_list", JSON.stringify(todos.map((t) => t.id)));
+}
+
+// Resolve a search_term to a Todo — supports number (last list) or text search
+async function resolveByTerm(
+  term: string,
+  finder: (t: string) => Promise<Todo | null>
+): Promise<Todo | null> {
+  if (/^\d+$/.test(term)) {
+    const lastListJson = await getSetting("last_list");
+    const ids: string[] = lastListJson ? JSON.parse(lastListJson) : [];
+    const id = ids[parseInt(term) - 1];
+    if (!id) return null;
+    return getTodoById(id);
+  }
+  // Strip [category] suffixes the user may have copied from the display
+  const cleaned = term.replace(/\s*\[.*?\]\s*/g, "").trim();
+  return finder(cleaned);
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -105,7 +120,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const valid = twilio.validateRequest(TWILIO_AUTH_TOKEN, signature, url, params);
   if (!valid) {
-    console.error("Twilio validation failed. url=%s token_len=%d sig=%s", url, TWILIO_AUTH_TOKEN?.length ?? 0, signature);
+    console.error("Twilio validation failed. url=%s token_len=%d", url, TWILIO_AUTH_TOKEN?.length ?? 0);
     return new NextResponse("Forbidden", { status: 403 });
   }
 
@@ -115,7 +130,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const message = (params["Body"] ?? "").trim();
   if (!message) return twimlReply("No message received.");
 
-  // Password reset — handle before Claude
   if (/^reset password$/i.test(message)) {
     const token = generateToken();
     const expiry = Date.now() + 15 * 60 * 1000;
@@ -188,35 +202,76 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         case "done": {
           const term = todo.search_term ?? "";
-          const numMatch = term.match(/^\d+$/);
-          let result;
-          if (numMatch) {
-            // Use last displayed list for number-based done
+          let result: Todo | null;
+          if (/^\d+$/.test(term)) {
             const lastListJson = await getSetting("last_list");
             const ids: string[] = lastListJson ? JSON.parse(lastListJson) : [];
-            const idx = parseInt(term) - 1;
-            const targetId = ids[idx];
-            if (!targetId) return twimlReply(`No item #${term} in the last list.`);
-            result = await markDoneById(targetId);
+            const id = ids[parseInt(term) - 1];
+            if (!id) return twimlReply(`No item #${term} in the last list.`);
+            result = await markDoneById(id);
           } else {
-            result = await markDone(term);
+            result = await markDone(term.replace(/\s*\[.*?\]\s*/g, "").trim());
           }
           if (!result) return twimlReply(`Couldn't find a to-do matching "${term}".`);
           return twimlReply(`✔️ Done: *${result.title}*`);
         }
 
+        case "update": {
+          if (!todo.search_term) return twimlReply("I need a task reference to update.");
+          const target = await resolveByTerm(todo.search_term, async (t) => {
+            // find by title match
+            const { supabaseAdmin } = await import("@/lib/supabase");
+            const { data } = await supabaseAdmin.from("todos").select("*").eq("done", false).ilike("title", `%${t}%`).limit(1);
+            return data?.[0] ?? null;
+          });
+          if (!target) return twimlReply(`Couldn't find a to-do matching "${todo.search_term}".`);
+
+          const updates: Record<string, unknown> = {};
+          if (todo.priority) updates.priority = todo.priority;
+          if (todo.category !== undefined) updates.category = todo.category;
+          if (todo.deadline) updates.deadline = todo.deadline;
+
+          const result = await updateTodo(target.id, updates as Parameters<typeof updateTodo>[1]);
+          if (!result) return twimlReply("Failed to update to-do.");
+
+          const parts: string[] = [];
+          if (todo.priority) parts.push(`priority → ${result.priority} ${priorityEmoji[result.priority]}`);
+          if (todo.category !== undefined && todo.category !== null) parts.push(`category → ${result.category}`);
+          if (todo.deadline) parts.push(`due → ${new Date(result.deadline! + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}`);
+
+          return twimlReply(`✏️ *${result.title}*: ${parts.join(", ")}`);
+        }
+
         case "prioritize": {
           if (!todo.search_term || !todo.priority)
-            return twimlReply("I need both a task name and a priority level.");
-          const result = await updatePriority(todo.search_term, todo.priority);
+            return twimlReply("I need both a task reference and a priority level.");
+          let result: Todo | null;
+          if (/^\d+$/.test(todo.search_term)) {
+            const lastListJson = await getSetting("last_list");
+            const ids: string[] = lastListJson ? JSON.parse(lastListJson) : [];
+            const id = ids[parseInt(todo.search_term) - 1];
+            if (!id) return twimlReply(`No item #${todo.search_term} in the last list.`);
+            result = await updatePriorityById(id, todo.priority);
+          } else {
+            result = await updatePriority(todo.search_term.replace(/\s*\[.*?\]\s*/g, "").trim(), todo.priority);
+          }
           if (!result) return twimlReply(`Couldn't find a to-do matching "${todo.search_term}".`);
           return twimlReply(`${priorityEmoji[result.priority]} *${result.title}* is now ${result.priority} priority`);
         }
 
         case "set_deadline": {
           if (!todo.search_term || !todo.deadline)
-            return twimlReply("I need both a task name and a deadline.");
-          const result = await updateDeadline(todo.search_term, todo.deadline);
+            return twimlReply("I need both a task reference and a deadline.");
+          let result: Todo | null;
+          if (/^\d+$/.test(todo.search_term)) {
+            const lastListJson = await getSetting("last_list");
+            const ids: string[] = lastListJson ? JSON.parse(lastListJson) : [];
+            const id = ids[parseInt(todo.search_term) - 1];
+            if (!id) return twimlReply(`No item #${todo.search_term} in the last list.`);
+            result = await updateDeadlineById(id, todo.deadline);
+          } else {
+            result = await updateDeadline(todo.search_term.replace(/\s*\[.*?\]\s*/g, "").trim(), todo.deadline);
+          }
           if (!result) return twimlReply(`Couldn't find a to-do matching "${todo.search_term}".`);
           const formatted = new Date(result.deadline! + "T00:00:00").toLocaleDateString("en-GB", {
             weekday: "short", day: "numeric", month: "short",
@@ -225,15 +280,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
 
         case "delete": {
-          if (!todo.search_term) return twimlReply("I need a task name to delete.");
-          const result = await deleteTodo(todo.search_term);
+          if (!todo.search_term) return twimlReply("I need a task reference to delete.");
+          let result: Todo | null;
+          if (/^\d+$/.test(todo.search_term)) {
+            const lastListJson = await getSetting("last_list");
+            const ids: string[] = lastListJson ? JSON.parse(lastListJson) : [];
+            const id = ids[parseInt(todo.search_term) - 1];
+            if (!id) return twimlReply(`No item #${todo.search_term} in the last list.`);
+            result = await deleteTodoById(id);
+          } else {
+            result = await deleteTodo(todo.search_term.replace(/\s*\[.*?\]\s*/g, "").trim());
+          }
           if (!result) return twimlReply(`Couldn't find a to-do matching "${todo.search_term}".`);
           return twimlReply(`🗑️ Deleted: *${result.title}*`);
         }
 
         case "unknown":
         default:
-          return twimlReply('Sorry, I didn\'t get that. Try: "add Taxes: file IRS next Friday high priority"');
+          return twimlReply('Sorry, I didn\'t get that. Try: "add Home: fix roof Friday urgent" or "done 2" or "delete 3"');
       }
     } catch {
       return twimlReply("Something went wrong. Please try again.");

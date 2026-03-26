@@ -11,6 +11,7 @@ export type Intent =
   | "list_month"
   | "list_year"
   | "done"
+  | "update"
   | "prioritize"
   | "set_deadline"
   | "delete"
@@ -35,10 +36,10 @@ export async function parseMessage(message: string): Promise<ParsedIntent> {
 
   const response = await client.messages.create({
     model: "claude-sonnet-4-20250514",
-    max_tokens: 256,
+    max_tokens: 300,
     system: `You are a to-do assistant. Parse the user's message and return ONLY valid JSON with this shape:
 {
-  "intent": "add" | "list_today" | "list_week" | "list_month" | "list_year" | "done" | "prioritize" | "set_deadline" | "delete" | "unknown",
+  "intent": "add" | "list_today" | "list_week" | "list_month" | "list_year" | "done" | "update" | "prioritize" | "set_deadline" | "delete" | "unknown",
   "todo": {
     "title": string | null,
     "notes": string | null,
@@ -49,8 +50,17 @@ export async function parseMessage(message: string): Promise<ParsedIntent> {
   }
 }
 
+Intent rules:
+- "add": create a new to-do. Category can be extracted from patterns like "Home: fix roof" or "fix roof under Home" → category "Home", title "Fix roof".
+- "update": update one or more fields (priority, category, deadline) on an existing to-do. Use this when the user wants to change category AND/OR priority AND/OR deadline together. Put the task reference (name or number) in search_term.
+- "prioritize": change priority only. Use search_term for the task reference.
+- "set_deadline": change deadline only. Use search_term for the task reference.
+- "done" / "delete": mark done or delete. "cancel" is a synonym for delete. Use search_term for the task reference.
+- search_term can be a number (e.g. "3") if the user references a task by its list position.
+- "list_today", "list_week", "list_month", "list_year": list open to-dos for that time window.
+
 Priority levels: urgent (most critical), high, medium (default), low.
-Category is a free-text project or area label (e.g. "Home", "Taxes", "Work"). Extract it if the user mentions one — e.g. "add Home: fix roof" → category "Home", title "Fix roof". If no category is mentioned, return null.
+Category is a free-text project/area label. Never hardcode values — extract whatever the user says.
 Today's date is ${today}. Timezone is Europe/Lisbon.
 Never return anything other than the JSON object.`,
     messages: [{ role: "user", content: message }],

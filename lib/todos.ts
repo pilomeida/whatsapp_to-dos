@@ -128,6 +128,30 @@ export async function listYear(): Promise<Todo[]> {
   return data as Todo[];
 }
 
+export async function deleteTodoById(id: string): Promise<Todo | null> {
+  const { data, error } = await supabaseAdmin
+    .from("todos").select("*").eq("id", id).single();
+  if (error || !data) return null;
+  await supabaseAdmin.from("todos").delete().eq("id", id);
+  return data as Todo;
+}
+
+export async function updatePriorityById(id: string, priority: Priority): Promise<Todo | null> {
+  const now = new Date().toISOString();
+  const { data, error } = await supabaseAdmin
+    .from("todos").update({ priority, updated_at: now }).eq("id", id).select().single();
+  if (error) return null;
+  return data as Todo;
+}
+
+export async function updateDeadlineById(id: string, deadline: string): Promise<Todo | null> {
+  const now = new Date().toISOString();
+  const { data, error } = await supabaseAdmin
+    .from("todos").update({ deadline, updated_at: now }).eq("id", id).select().single();
+  if (error) return null;
+  return data as Todo;
+}
+
 export async function markDoneById(id: string): Promise<Todo | null> {
   const doneAt = new Date().toISOString();
   const { data, error } = await supabaseAdmin
