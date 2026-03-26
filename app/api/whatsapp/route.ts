@@ -59,7 +59,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const valid = twilio.validateRequest(TWILIO_AUTH_TOKEN, signature, url, params);
   if (!valid) {
-    console.error("Twilio validation failed. url=%s sig=%s", url, signature);
+    console.error(
+      "Twilio validation failed. url=%s token_len=%d sig=%s params=%s",
+      url,
+      TWILIO_AUTH_TOKEN?.length ?? 0,
+      signature,
+      JSON.stringify(params)
+    );
     return new NextResponse("Forbidden", { status: 403 });
   }
 
