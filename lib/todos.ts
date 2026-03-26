@@ -89,6 +89,18 @@ export async function listToday(): Promise<Todo[]> {
   return sortByPriority(data as Todo[]);
 }
 
+export async function listTomorrow(): Promise<Todo[]> {
+  const tomorrow = lisbonDatePlusDays(1);
+  const { data, error } = await supabaseAdmin
+    .from("todos")
+    .select("*")
+    .eq("done", false)
+    .or(`deadline.is.null,deadline.lte.${tomorrow}`);
+
+  if (error) throw error;
+  return sortByPriority(data as Todo[]);
+}
+
 export async function listWeek(): Promise<Todo[]> {
   const end = lisbonDatePlusDays(7);
   const { data, error } = await supabaseAdmin

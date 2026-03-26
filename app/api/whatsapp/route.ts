@@ -4,6 +4,7 @@ import { parseMessage } from "@/lib/claude";
 import {
   addTodo,
   listToday,
+  listTomorrow,
   listWeek,
   listMonth,
   listYear,
@@ -110,7 +111,14 @@ async function resolveByTerm(
   }
   // Strip [category] suffixes the user may have copied from the display
   const cleaned = term.replace(/\s*\[.*?\]\s*/g, "").trim();
-  return finder(cleaned);
+  // Try full term first, then progressively drop trailing words (handles Whisper hallucinations)
+  const words = cleaned.split(/\s+/);
+  for (let len = words.length; len >= 1; len--) {
+    const partial = words.slice(0, len).join(" ");
+    const result = await finder(partial);
+    if (result) return result;
+  }
+  return null;
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -195,6 +203,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           const todos = await listToday();
           await saveLastList(todos);
           return twimlReply(formatFlatList("Today's to-dos", todos));
+        }
+
+        case "list_tomorrow": {
+          const todos = await listTomorrow();
+          await saveLastList(todos);
+          return twimlReply(formatFlatList("Tomorrow's to-dos", todos));
         }
 
         case "list_week": {
