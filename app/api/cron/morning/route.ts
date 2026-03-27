@@ -16,7 +16,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const todos = await listToday();
-  if (todos.length === 0) return new NextResponse("No todos today", { status: 200 });
+  if (todos.length === 0) {
+    await sendWhatsApp("☀️ *Good morning!* No to-dos for today.");
+    return new NextResponse("Sent", { status: 200 });
+  }
 
   const lines = todos
     .map((t, i) => {

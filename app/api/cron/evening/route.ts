@@ -16,7 +16,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const todos = await listOverdue();
-  if (todos.length === 0) return new NextResponse("No overdue todos", { status: 200 });
+  if (todos.length === 0) {
+    await sendWhatsApp("🌙 *All done today* — no pending to-dos to reschedule.");
+    return new NextResponse("Sent", { status: 200 });
+  }
 
   const lines = todos
     .map((t, i) => {
