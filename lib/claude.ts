@@ -11,6 +11,8 @@ export type Intent =
   | "list_week"
   | "list_month"
   | "list_year"
+  | "list_category"
+  | "list_priority"
   | "done"
   | "update"
   | "prioritize"
@@ -40,7 +42,7 @@ export async function parseMessage(message: string): Promise<ParsedIntent> {
     max_tokens: 300,
     system: `You are a to-do assistant. Parse the user's message and return ONLY valid JSON with this shape:
 {
-  "intent": "add" | "list_today" | "list_tomorrow" | "list_week" | "list_month" | "list_year" | "done" | "update" | "prioritize" | "set_deadline" | "delete" | "unknown",
+  "intent": "add" | "list_today" | "list_tomorrow" | "list_week" | "list_month" | "list_year" | "list_category" | "list_priority" | "done" | "update" | "prioritize" | "set_deadline" | "delete" | "unknown",
   "todo": {
     "title": string | null,
     "notes": string | null,
@@ -59,6 +61,8 @@ Intent rules:
 - "done" / "delete": mark done or delete. "cancel" is a synonym for delete. Use search_term for the task reference.
 - search_term can be a number (e.g. "3") if the user references a task by its list position.
 - "list_today", "list_tomorrow", "list_week", "list_month", "list_year": list open to-dos for that time window. Use "list_tomorrow" only when the user explicitly asks about tomorrow.
+- "list_category": list open to-dos for a specific category. Put the category name in todo.category. Example: "show home tasks" → category "Home".
+- "list_priority": list open to-dos for a specific priority level. Put the level in todo.priority. Example: "what are my urgent tasks?" → priority "urgent".
 
 Priority levels: urgent (most critical), high, medium (default), low.
 Category is a free-text project/area label. Never hardcode values — extract whatever the user says.

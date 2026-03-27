@@ -8,6 +8,8 @@ import {
   listWeek,
   listMonth,
   listYear,
+  listByCategory,
+  listByPriority,
   markDone,
   markDoneById,
   updatePriority,
@@ -209,6 +211,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           const todos = await listTomorrow();
           await saveLastList(todos);
           return twimlReply(formatFlatList("Tomorrow's to-dos", todos));
+        }
+
+        case "list_category": {
+          const cat = todo.category;
+          if (!cat) return twimlReply("Which category would you like to list?");
+          const todos = await listByCategory(cat);
+          await saveLastList(todos);
+          return twimlReply(formatFlatList(`${cat} to-dos`, todos));
+        }
+
+        case "list_priority": {
+          const pri = todo.priority;
+          if (!pri) return twimlReply("Which priority level would you like to list?");
+          const todos = await listByPriority(pri);
+          await saveLastList(todos);
+          const label = pri.charAt(0).toUpperCase() + pri.slice(1);
+          return twimlReply(formatFlatList(`${label} priority to-dos`, todos));
         }
 
         case "list_week": {

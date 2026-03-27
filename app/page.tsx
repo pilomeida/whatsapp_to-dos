@@ -28,6 +28,26 @@ const priorityLabel: Record<string, string> = {
   low: "Low",
 };
 
+// Colors distinct from priority palette (red/yellow/blue/green)
+const CATEGORY_COLORS = [
+  "bg-purple-100 text-purple-800 border-purple-300",
+  "bg-indigo-100 text-indigo-800 border-indigo-300",
+  "bg-teal-100 text-teal-800 border-teal-300",
+  "bg-orange-100 text-orange-800 border-orange-300",
+  "bg-rose-100 text-rose-800 border-rose-300",
+  "bg-cyan-100 text-cyan-800 border-cyan-300",
+  "bg-violet-100 text-violet-800 border-violet-300",
+  "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-300",
+];
+
+function getCategoryColor(category: string): string {
+  let hash = 0;
+  for (let i = 0; i < category.length; i++) {
+    hash = (hash * 31 + category.charCodeAt(i)) >>> 0;
+  }
+  return CATEGORY_COLORS[hash % CATEGORY_COLORS.length];
+}
+
 type Filter = "all" | "today" | "week" | "done";
 
 function isToday(deadline: string | null): boolean {
@@ -70,6 +90,8 @@ export default function Dashboard() {
   const [newPwd, setNewPwd] = useState("");
   const [pwdError, setPwdError] = useState("");
   const [pwdSaving, setPwdSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
 
   // Add form state
   const [newTitle, setNewTitle] = useState("");
@@ -172,6 +194,20 @@ export default function Dashboard() {
   async function handleDelete(id: string) {
     if (!confirm("Delete this to-do?")) return;
     await fetch(`/api/todos?id=${id}`, { method: "DELETE" });
+    fetchTodos();
+  }
+
+  async function saveTitle(id: string) {
+    const title = editingTitle.trim();
+    setEditingId(null);
+    if (!title) return;
+    const current = [...open, ...done].find((t) => t.id === id);
+    if (current && title === current.title) return;
+    await fetch("/api/todos", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, title }),
+    });
     fetchTodos();
   }
 
@@ -381,11 +417,45 @@ export default function Dashboard() {
                 {/* Content */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span
-                      className={`text-sm font-medium ${todo.done ? "line-through text-stone-400" : "text-stone-900"}`}
-                    >
-                      {todo.title}
-                    </span>
+                    {/* Category color box */}
+                    {todo.category && (
+                      <span
+                        className={`text-xs font-medium px-2 py-0.5 rounded border ${getCategoryColor(todo.category)}`}
+                      >
+                        {todo.category}
+                      </span>
+                    )}
+                    {/* Title — click to edit */}
+                    {editingId === todo.id ? (
+                      <input
+                        autoFocus
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onBlur={() => saveTitle(todo.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveTitle(todo.id);
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                        className="text-sm font-medium text-stone-900 border-b border-stone-400 focus:outline-none bg-transparent min-w-0 w-48"
+                      />
+                    ) : (
+                      <span
+                        onClick={() => {
+                          if (!todo.done) {
+                            setEditingId(todo.id);
+                            setEditingTitle(todo.title);
+                          }
+                        }}
+                        className={`text-sm font-medium ${
+                          todo.done
+                            ? "line-through text-stone-400"
+                            : "text-stone-900 cursor-text hover:text-stone-600"
+                        }`}
+                        title={todo.done ? undefined : "Click to edit"}
+                      >
+                        {todo.title}
+                      </span>
+                    )}
                     {/* Priority dot */}
                     <span
                       className={`w-2 h-2 rounded-full flex-shrink-0 ${priorityColor[todo.priority]}`}
@@ -396,12 +466,6 @@ export default function Dashboard() {
                     <p className="text-xs text-stone-400 mt-0.5">{todo.notes}</p>
                   )}
                   <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                    {/* Category tag */}
-                    {todo.category && (
-                      <span className="text-xs text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded">
-                        {todo.category}
-                      </span>
-                    )}
                     {/* Inline priority edit */}
                     {!todo.done && (
                       <select

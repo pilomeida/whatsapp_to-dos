@@ -140,6 +140,43 @@ export async function listYear(): Promise<Todo[]> {
   return data as Todo[];
 }
 
+export async function listByCategory(category: string): Promise<Todo[]> {
+  const { data, error } = await supabaseAdmin
+    .from("todos")
+    .select("*")
+    .eq("done", false)
+    .ilike("category", category)
+    .order("deadline", { ascending: true, nullsFirst: false });
+
+  if (error) throw error;
+  return sortByPriority(data as Todo[]);
+}
+
+export async function listByPriority(priority: Priority): Promise<Todo[]> {
+  const { data, error } = await supabaseAdmin
+    .from("todos")
+    .select("*")
+    .eq("done", false)
+    .eq("priority", priority)
+    .order("deadline", { ascending: true, nullsFirst: false });
+
+  if (error) throw error;
+  return data as Todo[];
+}
+
+export async function listOverdue(): Promise<Todo[]> {
+  const today = lisbonToday();
+  const { data, error } = await supabaseAdmin
+    .from("todos")
+    .select("*")
+    .eq("done", false)
+    .lt("deadline", today)
+    .order("deadline", { ascending: true });
+
+  if (error) throw error;
+  return sortByPriority(data as Todo[]);
+}
+
 export async function deleteTodoById(id: string): Promise<Todo | null> {
   const { data, error } = await supabaseAdmin
     .from("todos").select("*").eq("id", id).single();
