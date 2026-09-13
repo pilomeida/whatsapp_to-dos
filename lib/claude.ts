@@ -38,7 +38,10 @@ export async function parseMessage(message: string): Promise<ParsedIntent> {
   });
 
   const response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
+    // Haiku 4.5: fast/cheap tier, fits the 5s Twilio webhook budget without needing
+    // to manage thinking config (unlike a Sonnet 5+ model, where an unset `thinking`
+    // defaults to adaptive and can blow this budget — see claude.md).
+    model: "claude-haiku-4-5-20251001",
     max_tokens: 300,
     system: `You are a to-do assistant. Parse the user's message and return ONLY valid JSON with this shape:
 {
